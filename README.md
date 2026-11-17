@@ -1,10 +1,18 @@
-# Stock-market data warehouse
+# Stock Market Data Engineering Pipeline
 
-Final project, Data Engineering. Author: Aisha Shermatova (login `shermatova`).
+**Data Engineering Final Project**  
+**Author:** Aisha Shermatova  
+**Focus:** Data ingestion, orchestration, warehousing, data quality, analytical consistency, and change data capture (CDC)
 
-Daily US stock prices (CSV files plus the Twelve Data API) are loaded by Airflow into PostgreSQL through three layers
-(stg, ods, datamart). One mart is copied to ClickHouse and the same mart is rebuilt with dbt. Changes of a site table reach
-the ods layer through Debezium and Kafka (CDC). The focus is trustworthy, repeatable data processing, not price prediction.
+## Overview
+
+This project implements a stock-market data warehouse for daily U.S. equity data. Apache Airflow orchestrates ingestion from CSV files and the Twelve Data API into a three-layer PostgreSQL architecture: **staging (STG), operational data store (ODS), and datamarts**.
+
+The system builds daily and monthly analytical summaries, copies the daily mart into ClickHouse, and compares PostgreSQL and ClickHouse aggregates. A separate dbt implementation rebuilds the daily mart and applies automated tests. The repository also contains a distinct Debezium–Kafka Connect CDC demonstration that replicates changes from a PostgreSQL `customers` table into `ods_customers`.
+
+The objective is **trustworthy, repeatable data processing**, not stock-price prediction or trading strategy development.
+
+## Architecture
 
 ```mermaid
 flowchart TD
@@ -28,102 +36,204 @@ flowchart TD
     AIR -.-> CH
 ```
 
-## Repository
+Solid arrows represent data movement or processing dependencies; dotted arrows represent Airflow orchestration. The **CDC branch is a separate demonstration**, not part of the stock-price ETL path.
 
-```
-dag/    Airflow DAGs and the shared helper etl_common.py
-sql/    all SQL of the layers: DDL, ods loads, marts
-dbt/    dbt project: one mart, 8 tests, profile without secrets
-cdc/    Debezium and Kafka Connect: connector templates, register script, checks
-data/   notes on the three input files and the script that builds prices_daily.csv
-docs/   dataset passport, data model, presentation (PDF)
-```
+## Technology stack
 
-* DAG `final_shermatova_pipeline`: loads stg, builds ods, runs quality checks, triggers the datamart DAG with the same logical date.
-* DAG `final_shermatova_datamart`: builds both marts, runs checks, copies `dm_prices_daily` to ClickHouse, reconciles Postgres and ClickHouse.
-* DAG `final_shermatova_report`: read-only helper that prints row counts per layer, the last load-log rows and Postgres vs ClickHouse totals.
-* Details of layers, tables, grain, keys and metric definitions: [docs/data_model.md](docs/data_model.md). Sources: [docs/dataset_passport.md](docs/dataset_passport.md).
-
-## Verified results (course stand, trading day 2026-11-06)
-
-| Check | Result |
+| Component | Role |
 |---|---|
-| Staging rows for the day vs rows of the price file | 503 = 503 |
-| Daily mart | 503 tickers, 3,447,232,295 shares, 317 up, 183 down, 3 unchanged |
-| Exchange mart (month x exchange) | NYSE 342, NASDAQ 160 (two market codes), Cboe 1; its total equals the daily mart |
-| API cross-check | 8 tickers, 0.00% average difference between file close and API close |
-| Postgres vs ClickHouse | same row count and same sum of volume |
-| Re-run of the same date | all row counts unchanged in every layer |
-| dbt | 1 model and 8 tests passed, result equals the Airflow-built mart |
-| CDC (`customers` to `ods_customers`) | 20,000 rows, checksums equal; insert, update and delete arrive within 30 seconds |
+| Python and SQL | Ingestion, transformations, validation, and reporting |
+| Apache Airflow 2.10 | Task orchestration, dependencies, retries, and monitoring |
+| PostgreSQL 16 | Staging, ODS, and analytical datamarts |
+| ClickHouse | Copy of the daily mart and cross-database reconciliation |
+| dbt-postgres 1.8 | Independent daily mart implementation and automated tests |
+| Apache Kafka, Kafka Connect, Debezium | Change data capture from a separate PostgreSQL table |
+| Twelve Data API | Daily price observations for a limited set of symbols |
 
-## How the requirements are covered
+Versions refer to the original course environment; they are **not a tested standalone deployment specification**.
 
-| Requirement | Where |
+## Repository structure
+
+```text
+dag/    Airflow DAGs and shared helper etl_common.py
+sql/    PostgreSQL DDL, ODS loads, and datamart SQL
+dbt/    dbt models, schema tests, singular tests, and environment-based profile
+cdc/    Kafka Connect connector templates, registration and verification scripts, CDC SQL
+data/   Input-data instructions, transformation script, and small CSV samples
+docs/   Dataset passport, data model, and presentation PDF
+```
+
+### Main workflows
+
+- **`final_shermatova_pipeline`** — loads staging data, builds ODS tables, runs ODS quality checks, then triggers the datamart DAG using the same processing date.
+- **`final_shermatova_datamart`** — builds the daily and monthly marts, checks them, copies the daily mart into ClickHouse, and compares row counts and volume totals across databases.
+- **`final_shermatova_report`** — read-only reporting DAG for layer counts, load-log records, and PostgreSQL/ClickHouse totals.
+- **dbt** — independently computes `dm_prices_daily_dbt` from ODS models and checks its consistency with the Airflow-built mart.
+- **CDC demonstration** — uses Debezium and Kafka Connect to replicate `shermatova.customers` into `shermatova_ods.ods_customers`. This is separate from the stock-price data pipeline.
+
+See [Data model](docs/data_model.md) for schemas, grains, keys, and metric definitions, and [Dataset passport](docs/dataset_passport.md) for source provenance and dataset details.
+
+## Recorded validation results
+
+The following figures are **reported results from the original course environment for trading day 2026-11-06**, as documented in the project. They have **not been independently re-executed from this GitHub repository**.
+
+| Check | Recorded result |
 |---|---|
-| Sources: 2 CSV files and 1 API | `docs/dataset_passport.md`, `data/README.md` |
-| stg as text plus `_ds`, `_source_file`, `_loaded_at` | `sql/01_ddl.sql`, `dag/final_shermatova_pipeline.py` |
-| ods with types, keys, no duplicates | `sql/01_ddl.sql`, `sql/02_ods_*.sql` |
-| Load journal (one row per task attempt) | table `shermatova_stg.etl_load_log`, function `logged` in `dag/etl_common.py` |
-| Two marts (day; month x exchange), one uses the API | `sql/03_dm_*.sql`, `docs/data_model.md` |
-| Main DAG starts the datamart DAG with the same date | tasks `trigger_datamart` and `wait_datamart` |
-| Copy to ClickHouse without duplicates, reconciliation | `dag/final_shermatova_datamart.py` |
-| dbt model with `ref()` and tests | `dbt/` |
-| CDC of one table through Debezium and Kafka | `cdc/` |
-| Quality checks (keys, values, totals) | `CHECKS_ODS`, `CHECKS_DM` in `dag/etl_common.py`; dbt tests |
-| Re-run safe | every load deletes its own date and inserts it again in one transaction |
-| API timeout and retries, no partial data | task `load_stg_api`: timeout 20 s, 3 retries, writes only after the answer is validated |
-| No secrets in files | Airflow Connections and environment variables only (see below) |
+| Price-file rows vs. daily staging rows | 503 = 503 |
+| Daily mart | 503 tickers; total volume 3,447,232,295 shares; 317 advances, 183 declines, 3 unchanged |
+| Exchange breakdown | NYSE: 342; NASDAQ: 160 (two market codes); Cboe: 1; recorded total matches the daily mart |
+| API cross-check | 8 tickers; recorded average close-price difference: 0.00% |
+| PostgreSQL vs. ClickHouse | Matching row count and sum of volume |
+| Same-date rerun | Row counts unchanged across layers |
+| dbt build | 1 model and 8 tests passed (`PASS=9`); results reported to match the Airflow-built mart |
+| CDC: `customers` → `ods_customers` | Project documentation reports 20,000 rows, matching checksums, and insert/update/delete propagation within 30 seconds |
 
-## Run it from scratch
+**Evidence boundary:** These figures come from the project's recorded course-run summary. The code contains checks and reconciliation routines, but this README does not provide the original execution logs or independently establish the latency and row-count claims. See the CDC scripts in [`cdc/`](cdc/) for the implementation that this repository actually contains.
 
-The project was built on the course stand (Postgres 16, Airflow 2.10, dbt-postgres 1.8, ClickHouse, Kafka Connect with Debezium).
-The DAG files import `student_dag` from the stand helper `_lib.tenant`; outside the stand replace it with the standard `airflow.DAG`.
+## Engineering controls and requirement coverage
 
-1. **Files.** Copy the repository to `~/work/dags/project/`. Put the three input files into `data/` (see `data/README.md`).
-2. **Airflow connections** (Admin, Connections):
-   * `aiacademy_pg_shermatova`: Postgres connection, database `aiacademy`;
-   * `shermatova_clickhouse`: ClickHouse connection;
-   * `twelvedata_shermatova`: type HTTP, host `https://api.twelvedata.com`, the API key goes into the secret field of the form.
-3. **Switch on** the DAGs `final_shermatova_pipeline` and `final_shermatova_datamart`.
-4. **Run a day.** Trigger `final_shermatova_pipeline` with the logical date `2026-11-06` (a working day: the price file has no rows for weekends), or use the trigger page
-   `/dags/<dag id>/trigger` and the configuration `{"ds": "2026-11-06"}`.
-5. **Check** (terminal, the `PG*` variables are set):
-   ```
-   psql -c "select * from shermatova_stg.etl_load_log order by id desc limit 15"
-   psql -c "select count(*) from shermatova_stg.stg_prices_daily where _ds = '2026-11-06'"
-   psql -c "select * from shermatova_datamart.dm_prices_daily"
-   psql -c "select * from shermatova_datamart.dm_prices_exchange_month"
-   ```
-   The helper DAG `final_shermatova_report` prints an overview, including Postgres vs ClickHouse.
-6. **dbt:** `cd dbt && dbt build -s dm_prices_daily_dbt --profiles-dir profiles` ends with `PASS=9`.
-7. **CDC**, from the repository root:
-   ```
-   psql -v ON_ERROR_STOP=1 -f cdc/sql/00_sink_table.sql     # target table
-   psql -v ON_ERROR_STOP=1 -f cdc/sql/01_publication.sql    # publication for Debezium
-   python cdc/register.py                                   # creates both connectors
-   sh cdc/status.sh                                         # both must be RUNNING
-   python cdc/verify_cdc.py                                 # source = ods_customers: OK
-   psql -f cdc/sql/02_change_demo.sql                       # update + insert, wait 30 s, run verify_cdc.py again
-   psql -f cdc/sql/03_revert.sql                            # restore + delete, wait 30 s, run verify_cdc.py again
-   ```
-   Remove everything with `python cdc/register.py --delete` and `psql -f cdc/sql/99_cleanup.sql`.
+| Engineering concern | Implementation |
+|---|---|
+| File and API ingestion | `dag/final_shermatova_pipeline.py`; source information in `data/README.md` |
+| Raw staging fields and load metadata | `sql/01_ddl.sql`, `dag/final_shermatova_pipeline.py` |
+| Typed, keyed ODS tables | `sql/01_ddl.sql`, `sql/02_ods_*.sql` |
+| Load audit log | `shermatova_stg.etl_load_log`; `logged()` in `dag/etl_common.py` |
+| Daily and monthly datamarts | `sql/03_dm_*.sql`, `docs/data_model.md` |
+| Consistent processing date between DAGs | `trigger_datamart` / `wait_datamart` in the main pipeline DAG |
+| ODS and mart quality checks | `CHECKS_ODS`, `CHECKS_DM` in `dag/etl_common.py` |
+| Same-day replacement for event data | `replace_day()` in `dag/etl_common.py`; day-scoped transformations |
+| ClickHouse copy and reconciliation | `dag/final_shermatova_datamart.py` |
+| Independent dbt model and tests | `dbt/models/`, `dbt/tests/` |
+| Kafka-based CDC demonstration | `cdc/` connector templates, SQL, and verification script |
+| API failure handling | `load_stg_api` uses a 20-second request timeout and Airflow task retry configuration; it validates the response before replacing that day's staging rows |
+| Credential configuration | Airflow Connections and environment variables; inspect configuration before use |
 
-## Failure checks
+**Important distinction:** A same-date rerun replaces the relevant dated records; it is not a claim that every table uses the identical replacement mechanism. Reference datasets are also handled through their own loading logic.
 
-* **Re-run the same date:** trigger it again; the counts stay the same.
-* **API down:** change the host of the connection `twelvedata_shermatova` to a wrong address and run. `load_stg_api` turns red after its retries and `stg_twelvedata` gets no rows. Restore the host afterwards.
-* **Broken data:** `psql -c "update shermatova_ods.ods_prices set close_price = -1 where trade_date = '2026-11-06' and ticker = 'AAPL'"`, then clear the task `dq_ods` of that run in Airflow. It fails and names the check. Running the day again repairs it.
+## Running in the original course environment
 
-## Secrets
+The project was built for a shared course environment with **PostgreSQL 16, Apache Airflow 2.10, dbt-postgres 1.8, ClickHouse, Kafka Connect, and Debezium**.
 
-No secret is stored in code, `profiles.yml`, connector files, docs or this file. Postgres, ClickHouse and the API key live in Airflow
-Connections. dbt and `cdc/register.py` read the terminal variables `PGHOST`, `PGPORT`, `PGUSER`, `PGDATABASE` and the secret
-variable of the terminal. A search for the word that starts with "pass" finds only lines that read these Connections or variables.
-The API key is sent in a request header, never in a URL.
+**Reproducibility note:** The DAGs import `student_dag` from the course-specific helper `_lib.tenant`. This helper is not included in the repository. Executing the pipeline outside the course environment requires adapting the DAG definitions (for example, to standard Airflow `DAG` objects), provisioning the dependent services, and configuring compatible connections, paths, database permissions, and data files. The steps below document the *original environment*, not a tested one-command local installation.
 
-## Known limits
+### 1. Place the files and obtain the datasets
 
-* The free API plan allows 8 requests a minute, so each run asks for 8 tickers (`API_SYMBOLS` in `dag/etl_common.py`).
-* One run loads one trading day. On weekends and holidays the run finishes green with 0 rows.
-* Only the daily mart is copied to ClickHouse; CDC targets PostgreSQL.
+In the original environment, place the project under `~/work/dags/project/`. The three main input CSV files are described in [data/README.md](data/README.md):
+
+- `prices_daily.csv` — long-format daily price history, prepared using `data/prepare_prices.py` from the source dataset;
+- `12data_stocks.csv` — Twelve Data equity reference data;
+- `12data_stock_exchanges.csv` — Twelve Data exchange reference data.
+
+The repository includes **small sample CSVs**, not the complete source files. Obtain the inputs from their original providers and review their usage terms.
+
+### 2. Configure Airflow Connections
+
+Set the following connections in the course environment (Airflow → Admin → Connections):
+
+- `aiacademy_pg_shermatova`: PostgreSQL connection for the `aiacademy` database;
+- `shermatova_clickhouse`: ClickHouse connection;
+- `twelvedata_shermatova`: HTTP connection with host `https://api.twelvedata.com` and the API key stored in the connection's secret/password field.
+
+Do not commit credentials into code, documentation, or connector templates.
+
+### 3. Run the main DAGs
+
+Enable `final_shermatova_pipeline` and `final_shermatova_datamart`. Trigger the pipeline for the recorded test date **2026-11-06**, or supply the configuration below when triggering manually:
+
+```json
+{"ds": "2026-11-06"}
+```
+
+The pipeline passes the date to the datamart DAG. Use a trading date for which the required source records exist.
+
+### 4. Inspect PostgreSQL outputs
+
+With PostgreSQL client connection variables configured in the terminal:
+
+```bash
+psql -c "SELECT * FROM shermatova_stg.etl_load_log ORDER BY id DESC LIMIT 15;"
+psql -c "SELECT count(*) FROM shermatova_stg.stg_prices_daily WHERE _ds = '2026-11-06';"
+psql -c "SELECT * FROM shermatova_datamart.dm_prices_daily;"
+psql -c "SELECT * FROM shermatova_datamart.dm_prices_exchange_month;"
+```
+
+Run `final_shermatova_report` for additional read-only reporting, including PostgreSQL and ClickHouse totals.
+
+### 5. Build and test the dbt mart
+
+From the project root, with the required `PGHOST`, `PGPORT`, `PGUSER`, `PGPASSWORD`, and `PGDATABASE` environment variables set:
+
+```bash
+cd dbt
+dbt build -s dm_prices_daily_dbt --profiles-dir profiles
+```
+
+The recorded course run reported `PASS=9` (one model and eight tests). This command requires the corresponding populated PostgreSQL source tables.
+
+### 6. Run the separate CDC demonstration
+
+The published CDC implementation replicates **`shermatova.customers` → `shermatova_ods.ods_customers`**, not the stock-price table. It requires an accessible source table, configured replication permissions, Kafka Connect/Debezium, and the necessary PostgreSQL environment variables.
+
+From the repository root in the original environment:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f cdc/sql/00_sink_table.sql
+psql -v ON_ERROR_STOP=1 -f cdc/sql/01_publication.sql
+python cdc/register.py
+sh cdc/status.sh
+python cdc/verify_cdc.py
+```
+
+The demo scripts can then exercise changes and restoration:
+
+```bash
+psql -v ON_ERROR_STOP=1 -f cdc/sql/02_change_demo.sql
+# Allow the connector pipeline to process changes, then:
+python cdc/verify_cdc.py
+
+psql -v ON_ERROR_STOP=1 -f cdc/sql/03_revert.sql
+# Allow the connector pipeline to process changes, then:
+python cdc/verify_cdc.py
+```
+
+**Use the following cleanup only in an isolated or explicitly authorized course environment.** It removes connector resources and related CDC setup:
+
+```bash
+python cdc/register.py --delete
+psql -v ON_ERROR_STOP=1 -f cdc/sql/99_cleanup.sql
+```
+
+Do not run setup, mutation, or cleanup commands against production or shared infrastructure without permission.
+
+## Reliability and failure scenarios
+
+The following are **test procedures supported by the implementation**, not a claim that every scenario has a separately archived execution log:
+
+- **Rerun behavior:** Run the same processing date again and compare counts and aggregates. Dated staging and mart loads are designed to avoid accumulating duplicate records on rerun.
+- **API unavailability:** In a nonproduction test environment, deliberately configure an unreachable API endpoint. Confirm that `load_stg_api` fails after its configured retries without committing an invalid or partial API payload, then restore the connection.
+- **Invalid source values:** In a disposable test database, introduce a deliberately invalid price value and rerun the relevant ODS quality check. The check should report a violation; reloading the date should restore valid source-derived data.
+- **CDC consistency:** Compare source and sink counts and checksums with `cdc/verify_cdc.py` after changes have been processed. Successful execution depends on the original environment and data.
+
+## Credential handling
+
+The project is **designed** to obtain credentials from Airflow Connections or environment variables rather than embedding them directly in source files:
+
+- Airflow connections provide PostgreSQL, ClickHouse, and Twelve Data credentials.
+- The dbt profile at `dbt/profiles/profiles.yml` reads PostgreSQL credentials from environment variables.
+- `cdc/register.py` reads PostgreSQL connection variables when rendering connector configuration.
+- The Twelve Data API key is provided through the request's authorization header rather than a URL query parameter.
+
+**Security caveat:** These design choices do not constitute a comprehensive secrets audit. Review the full repository and Git history before publishing, and use dedicated low-privilege credentials. Kafka Connect configuration APIs may expose resolved connector configuration to authorized administrators, so restrict access to the connector service and use an appropriate secret-management mechanism for deployment.
+
+## Known limitations
+
+- **Course-specific dependency:** `_lib.tenant.student_dag` is not included; standalone deployment requires adaptation and infrastructure setup.
+- **External data required:** The complete input datasets are not included in GitHub; only small examples are provided.
+- **API quota:** The original free-plan workflow requests eight predefined symbols (`API_SYMBOLS` in `dag/etl_common.py`) per run; quotas and API responses depend on the provider's plan and current policies.
+- **Processing granularity:** A pipeline run targets a single processing date. Nontrading dates may yield no price rows; zero-row completion should not automatically be interpreted as successful data coverage.
+- **ClickHouse scope:** Only the daily mart is copied to ClickHouse; the separate CDC demonstration targets PostgreSQL.
+- **Validation evidence:** Recorded results originate from the original course run; independent deployment and execution have not been demonstrated by this repository.
+
+## Project scope
+
+This is an educational engineering project demonstrating ingestion, orchestration, warehousing, quality checks, reconciliation, and CDC. It is not a production trading system or an investment recommendation.
