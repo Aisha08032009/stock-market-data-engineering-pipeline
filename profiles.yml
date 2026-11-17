@@ -1,0 +1,13 @@
+# No secrets here: everything comes from environment variables that already exist in the terminal.
+shermatova_final:
+  target: pg
+  outputs:
+    pg:
+      type: postgres
+      host: "{{ env_var('PGHOST') }}"
+      port: "{{ env_var('PGPORT', '5432') | as_number }}"
+      user: "{{ env_var('PGUSER') }}"
+      password: "{{ env_var('PGPASSWORD') }}"
+      dbname: "{{ env_var('PGDATABASE') }}"
+      schema: shermatova_datamart
+      threads: 2

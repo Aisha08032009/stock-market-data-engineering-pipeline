@@ -1,0 +1,22 @@
+# big or generated data
+data/*.csv
+data/*.zip
+data/*.parquet
+!data/sample/*.csv
+
+# Python / tools
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.log
+logs/
+
+# dbt build output and local profile cache
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/profiles/.user.yml
+
+# secrets (none are used in this project, kept as a safety net)
+.env
+*.pem
