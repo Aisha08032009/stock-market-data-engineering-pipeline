@@ -7,15 +7,25 @@ Daily US stock prices (CSV files plus the Twelve Data API) are loaded by Airflow
 the ods layer through Debezium and Kafka (CDC). The focus is trustworthy, repeatable data processing, not price prediction.
 
 ```mermaid
-flowchart LR
-    P[prices_daily.csv] --> S[STG raw text]
-    R[reference CSV files] --> S
-    A[Twelve Data API] --> S
-    S --> O[ODS typed and keyed]
-    O --> M[Datamart two marts]
-    M --> C[ClickHouse dm_prices_daily]
-    O --> D[dbt dm_prices_daily_dbt]
-    W[site table customers] -->|Debezium and Kafka| OC[ods_customers]
+flowchart TD
+    CSV[Stock price and reference CSVs] --> STG[PostgreSQL staging]
+    API[Twelve Data API] --> STG
+    STG --> ODS[PostgreSQL ODS]
+    ODS --> DQ[Data quality checks]
+    DQ --> MART[Daily and monthly datamarts]
+    MART --> CH[ClickHouse daily mart copy]
+    CH --> RECON[PostgreSQL vs ClickHouse reconciliation]
+    ODS --> DBT[dbt daily mart rebuild and tests]
+
+    SRC[PostgreSQL customers table] --> DEB[Debezium source connector]
+    DEB --> KAFKA[Kafka topic]
+    KAFKA --> SINK[Kafka Connect sink]
+    SINK --> TARGET[PostgreSQL ods_customers]
+
+    AIR[Apache Airflow] -.-> STG
+    AIR -.-> DQ
+    AIR -.-> MART
+    AIR -.-> CH
 ```
 
 ## Repository
