@@ -1,0 +1,14 @@
+name: 'shermatova_final'
+version: '1.0.0'
+config-version: 2
+profile: 'shermatova_final'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+
+models:
+  shermatova_final:
+    ods:
+      +materialized: ephemeral      # thin wrappers over the ods tables, no extra objects in the database
+    marts:
+      +materialized: table

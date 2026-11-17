@@ -1,0 +1,59 @@
+version: 2
+
+sources:
+  - name: ods
+    schema: shermatova_ods
+    description: "Cleaned layer filled by the Airflow DAG final_shermatova_pipeline."
+    tables:
+      - name: ods_prices
+        description: "Daily OHLCV price of one ticker. Grain: trade_date x ticker."
+        columns:
+          - {name: trade_date, description: "Trading day"}
+          - {name: ticker, description: "Ticker as written in the price file (BRK-B style)"}
+      - name: ods_twelvedata_prices
+        description: "Daily candle from the Twelve Data API for a few tickers. Grain: trade_date x symbol."
+  - name: datamart
+    schema: shermatova_datamart
+    tables:
+      - name: dm_prices_daily
+        description: "Mart built by the Airflow DAG final_shermatova_datamart (used to compare with the dbt result)."
+
+models:
+  - name: ods_prices
+    description: "Ephemeral wrapper over ods_prices."
+  - name: ods_twelvedata_prices
+    description: "Ephemeral wrapper over ods_twelvedata_prices."
+  - name: dm_prices_daily_dbt
+    description: >
+      Market summary for one trading day (grain: one row per day), built with dbt.
+      Must give the same numbers as the Airflow-built dm_prices_daily.
+    columns:
+      - name: trade_date
+        description: "Trading day. Primary key of the mart."
+        data_tests: [unique, not_null]
+      - name: tickers_count
+        description: "Number of tickers that traded that day."
+        data_tests: [not_null]
+      - name: total_volume
+        description: "Sum of traded shares over all tickers."
+        data_tests: [not_null]
+      - name: total_traded_value
+        description: "Sum of close_price * volume over all tickers (USD)."
+        data_tests: [not_null]
+      - name: advancers
+        description: "Tickers whose close was above the open."
+      - name: decliners
+        description: "Tickers whose close was below the open."
+      - name: unchanged
+        description: "Tickers whose close equals the open."
+      - name: avg_range_pct
+        description: "Average (high - low) / open in percent."
+      - name: api_tickers_checked
+        description: "How many tickers also came from the Twelve Data API for that day."
+      - name: api_avg_abs_close_diff_pct
+        description: "Average absolute difference in percent between the file close and the API close. The metric that uses API data."
+      - name: api_check_status
+        description: "ok = difference below 1 percent, check = 1 percent or more, no_api_data = API not loaded for that day."
+        data_tests:
+          - accepted_values:
+              values: ['ok', 'check', 'no_api_data']

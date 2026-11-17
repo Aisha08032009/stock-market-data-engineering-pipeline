@@ -1,0 +1,24 @@
+{
+  "name": "customers-source-shermatova",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "${PG_HOST}",
+    "database.port": "${PG_PORT}",
+    "database.user": "${PG_USER}",
+    "database.password": "${PG_SECRET}",
+    "database.dbname": "${PG_DBNAME}",
+    "topic.prefix": "shermatova",
+    "table.include.list": "shermatova.customers",
+    "plugin.name": "pgoutput",
+    "slot.name": "debezium_customers_shermatova",
+    "publication.name": "dbz_customers_shermatova",
+    "publication.autocreate.mode": "disabled",
+    "snapshot.mode": "initial",
+    "tombstones.on.delete": "true",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "true",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "true"
+  }
+}
